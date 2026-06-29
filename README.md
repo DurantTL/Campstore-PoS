@@ -8,7 +8,7 @@ Local-first point of sale web app for the Iowa-Missouri Conference camp store. T
 - Local SQLite users with hashed passwords and roles: `OWNER`, `ADMIN`, and `CLERK`.
 - Clerk POS screen with searchable campers and items, touch-friendly cart, quantity controls, current balance, and new balance preview.
 - CafeScanner-style layout: light gray background, centered cards, compact top nav, and blue primary actions.
-- Admin/backend control screen for dashboard stats, status, settings, imports, sync, diagnostics, recent transactions, and user management.
+- Admin/backend control screen for dashboard stats, Google Sheets configuration, status, settings, imports, sync, diagnostics, recent transactions, and user management.
 - SQLite live operational database with WAL enabled.
 - Google Sheets import/sync:
   - `Items` tab: column A `Cost`, column B `Item Name`.
@@ -74,24 +74,53 @@ npm run users:password -- username newPassword
 
 Roles are `OWNER`, `ADMIN`, and `CLERK`; `users:create` defaults to `CLERK` when the role is omitted. Keep `SESSION_SECRET` stable across restarts so existing sessions remain valid; change it when you intentionally want to invalidate all sessions.
 
-## Google Sheets setup
+## Google Sheets setup from the Admin UI
 
-1. Create a Google Cloud service account and enable the Google Sheets API.
-2. Share the spreadsheet with the service account email as an editor.
-3. Create three tabs named exactly:
-   - `Items`
-   - `Campers / Balances`
-   - `Logs`
-4. Fill row 1 headers and put data beginning on row 2.
-5. Configure `.env`:
+Google Sheets can be configured after first setup without editing `.env`. Existing `.env` values are still used as fallback defaults until settings are saved in SQLite.
 
-```bash
-GOOGLE_SPREADSHEET_ID=your_sheet_id
-GOOGLE_SERVICE_ACCOUNT_EMAIL=service-account@project.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-```
+1. Sign in as an `OWNER` or `ADMIN`. `CLERK` users cannot open the admin configuration screen or call the settings/import/sync APIs.
+2. Open **Admin → Configuration**.
+3. Enter:
+   - **Spreadsheet ID** from the Google Sheet URL.
+   - **Service Account Email** from the Google Cloud service account.
+   - **Private Key** from the service account JSON, or paste the full service account JSON into the optional JSON box.
+4. Click **Save Google Settings**. The private key is stored locally in SQLite and is not displayed back in full; the UI only shows configured/masked status.
+5. Click **Test Google Connection**. The test verifies credentials and required tab names.
 
-Run `npm run validate:env`, then use Admin → Refresh/import from Google Sheets.
+### Required Google Sheet tabs and columns
+
+Create these tabs with names exactly as shown:
+
+- `Items`
+  - Column A: `Cost`
+  - Column B: `Item Name`
+- `Campers / Balances`
+  - Column A: `Child Name`
+  - Column B: `Initial Balance`
+  - Column C: `Current Balance`
+- `Logs`
+  - Transaction logs are appended here during sync.
+
+Rows begin on row 2. Blank rows are skipped. Bad money values, missing required fields, invalid tab names, and duplicate camper names are reported as detailed errors in the Admin UI.
+
+### Service account sharing instructions
+
+1. In Google Cloud, create a service account and enable the Google Sheets API for the project.
+2. Create/download a JSON key for the service account.
+3. Open the Google Sheet, click **Share**, and share it with the service account `client_email` as **Editor**.
+4. Paste the service account email/key or full JSON into **Admin → Configuration**.
+
+### Import/sync workflow
+
+Use **Admin → Configuration** or the dashboard import/sync card:
+
+- **Test Connection** validates credentials and tabs.
+- **Import Items only** imports `Items!A2:B`.
+- **Import Campers/Balances only** imports `Campers / Balances!A2:C`.
+- **Import Everything** imports items and campers/balances.
+- **Push Pending Transactions** appends unsynced local sales to `Logs` and updates camper current balances in `Campers / Balances`.
+
+The dashboard shows Google Sheets status, last import time, last sync time, and pending sync count.
 
 ## Deployment/update approach
 
@@ -146,7 +175,7 @@ The importer warns about duplicate child names and rejects invalid money values.
 
 - `Invalid username or password`: verify the user exists and is active in SQLite, or recreate an owner with the default owner environment variables on a fresh database.
 - `Authentication required`: sign in again; sessions expire after 12 hours.
-- `Google Sheets credentials are not configured`: check `.env` values and restart the service.
+- `Google Sheets credentials are not configured`: open Admin → Configuration and save Spreadsheet ID, service account email, and private key; `.env` remains a fallback.
 - Pending transactions remain after sync: inspect Admin status events and transaction errors.
 - Incorrect camper balance in Sheets: local transactions are authoritative; run Push pending transactions, then verify the camper row in `Campers / Balances`.
 - Import caution: importing does not intentionally overwrite local unsynced transaction logs. Perform pending sync before a new operating day import when possible.
