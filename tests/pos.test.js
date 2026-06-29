@@ -33,3 +33,22 @@ test('login creates a session and protected routes require it', async () => {
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+
+test('items support category data', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'campstore-items-')), 'test.sqlite');
+  process.env.DATABASE_PATH = dbPath;
+  process.env.DEFAULT_OWNER_USERNAME = 'owner2';
+  process.env.DEFAULT_OWNER_PASSWORD = 'secret123';
+  process.env.SESSION_SECRET = 'test-session-secret-2';
+  delete require.cache[require.resolve('../server')];
+  const { db } = require('../server');
+  const cols = db.prepare('PRAGMA table_info(items)').all().map(c => c.name);
+  assert.ok(cols.includes('category'));
+  db.prepare('INSERT INTO items(id,name,cost_cents,category,active,updated_at) VALUES(?,?,?,?,?,?)').run('item_1', 'Flashlight', 250, 'Camping', 1, new Date().toISOString());
+  const item = db.prepare('SELECT name,cost_cents,category,active FROM items WHERE id=?').get('item_1');
+  assert.deepEqual(item, { name: 'Flashlight', cost_cents: 250, category: 'Camping', active: 1 });
+});

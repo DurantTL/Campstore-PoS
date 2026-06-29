@@ -6,12 +6,12 @@ Local-first point of sale web app for the Iowa-Missouri Conference camp store. T
 
 - Login-first access pattern with signed HTTP-only session cookies.
 - Local SQLite users with hashed passwords and roles: `OWNER`, `ADMIN`, and `CLERK`.
-- Clerk POS screen with searchable campers and items, touch-friendly cart, quantity controls, current balance, and new balance preview.
+- Clerk POS screen with searchable campers, searchable items, category browsing, touch-friendly cart, quantity controls, current balance, and new balance preview.
 - CafeScanner-style layout: light gray background, centered cards, compact top nav, and blue primary actions.
 - Admin/backend control screen for dashboard stats, Google Sheets configuration, status, settings, imports, sync, diagnostics, recent transactions, and user management.
 - SQLite live operational database with WAL enabled.
 - Google Sheets import/sync:
-  - `Items` tab: column A `Cost`, column B `Item Name`.
+  - `Items` tab: column A `Cost`, column B `Item Name`, column C `Category`.
   - `Campers / Balances` tab: column A `Child Name`, column B `Initial Balance`, column C `Current Balance`.
   - `Logs` tab receives transaction append rows with timestamp, clerk, child, balances, total, purchased items, transaction ID, and status.
 - Offline queue: sales update local balances immediately and remain pending until sync succeeds.
@@ -94,6 +94,7 @@ Create these tabs with names exactly as shown:
 - `Items`
   - Column A: `Cost`
   - Column B: `Item Name`
+  - Column C: `Category`
 - `Campers / Balances`
   - Column A: `Child Name`
   - Column B: `Initial Balance`
@@ -101,7 +102,7 @@ Create these tabs with names exactly as shown:
 - `Logs`
   - Transaction logs are appended here during sync.
 
-Rows begin on row 2. Blank rows are skipped. Bad money values, missing required fields, invalid tab names, and duplicate camper names are reported as detailed errors in the Admin UI.
+Rows begin on row 2. Blank rows are skipped. Item rows with missing item names or invalid costs are skipped with detailed Admin UI warnings; item rows with missing categories import as `Uncategorized` with warnings. Invalid tab names and duplicate camper names are reported as detailed errors in the Admin UI.
 
 ### Service account sharing instructions
 
@@ -115,12 +116,12 @@ Rows begin on row 2. Blank rows are skipped. Bad money values, missing required 
 Use **Admin → Configuration** or the dashboard import/sync card:
 
 - **Test Connection** validates credentials and tabs.
-- **Import Items only** imports `Items!A2:B`.
+- **Import Items only** imports `Items!A2:C` and reports imported item counts by category when the import completes.
 - **Import Campers/Balances only** imports `Campers / Balances!A2:C`.
 - **Import Everything** imports items and campers/balances.
 - **Push Pending Transactions** appends unsynced local sales to `Logs` and updates camper current balances in `Campers / Balances`.
 
-The dashboard shows Google Sheets status, last import time, last sync time, and pending sync count.
+The dashboard shows Google Sheets status, last import time, last sync time, pending sync count, total items, and item counts by category.
 
 ## Deployment/update approach
 
@@ -169,7 +170,7 @@ Back up before imports, before updates, and at the end of store days.
 
 ## Sheet validation notes
 
-The importer warns about duplicate child names and rejects invalid money values. Blank item/camper rows are skipped. Avoid renaming tabs or moving required columns.
+The importer rejects duplicate child names and camper balance errors. Item import skips blank rows, warns and skips missing item names or invalid costs, and warns when a category is missing. Avoid renaming tabs or moving required columns.
 
 ## Troubleshooting
 
