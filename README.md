@@ -40,9 +40,9 @@ DEFAULT_OWNER_DISPLAY_NAME="Camp Store Owner"
 SESSION_SECRET="change-this-random-session-secret"
 ```
 
-When the app starts, it creates the default `OWNER` user if that username does not already exist. Passwords are stored as salted `scrypt` hashes in SQLite, never as plain text.
+`npm run setup` initializes the SQLite database, applies migrations, and creates or updates the default `OWNER` user from these values. Passwords are stored as salted `scrypt` hashes in SQLite, never as plain text.
 
-If you add the default owner variables after the database already exists, restart the app once; the owner will be created if the username is not present.
+For first login, open `http://localhost:3077` after setup and sign in with `DEFAULT_OWNER_USERNAME` and `DEFAULT_OWNER_PASSWORD`. No manual SQL is required. If you change the default owner variables later, run `npm run setup` again to update that owner account, including its password, display name, role, and active status.
 
 ## Roles and access
 
@@ -61,11 +61,18 @@ All POS data API endpoints require a valid login. Admin APIs additionally requir
 3. Enter username, display name, role, and a temporary password.
 4. Select **Create user**.
 
-### Direct SQLite maintenance
+### From the command line
 
-Prefer the in-app user management screen so passwords are hashed correctly. If you must maintain users directly, generate password hashes through the application code path rather than inserting plain text into `users.password_hash`.
+Run these commands from the application directory on the server. They use the configured `.env` database path and application password hashing, so no manual SQL is required.
 
-To rotate the default owner password after first setup, sign in as an `OWNER`, create a new owner or use an application/API password-change flow, then remove or rotate the old credentials. Keep `SESSION_SECRET` stable across restarts so existing sessions remain valid; change it when you intentionally want to invalidate all sessions.
+```bash
+npm run list-users
+npm run create-user -- clerk1 temporary-password "Store Clerk" CLERK
+npm run create-user -- admin1 temporary-password "Store Admin" ADMIN
+npm run change-password -- clerk1 new-temporary-password
+```
+
+Roles are `OWNER`, `ADMIN`, and `CLERK`; `create-user` defaults to `CLERK` when the role is omitted. Keep `SESSION_SECRET` stable across restarts so existing sessions remain valid; change it when you intentionally want to invalidate all sessions.
 
 ## Google Sheets setup
 
@@ -90,13 +97,21 @@ Run `npm run validate:env`, then use Admin → Refresh/import from Google Sheets
 
 This app is a single Node/Express service serving static frontend files and API endpoints. A typical internal deployment can run it with systemd, PM2, Docker, or another existing IMSDA host process manager.
 
-Recommended update flow:
+Recommended CafeScanner-style update flow:
 
 ```bash
 git pull
 npm install --omit=dev
 npm run setup
-npm start
+sudo systemctl restart campstore-pos
+```
+
+The same flow is available as a script:
+
+```bash
+SERVICE_NAME=campstore-pos ./scripts/update-app.sh
+# or, for non-systemd hosts:
+RESTART_CMD="pm2 restart campstore-pos" ./scripts/update-app.sh
 ```
 
 Deployment notes:
