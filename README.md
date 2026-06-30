@@ -80,26 +80,28 @@ Google Sheets can be configured after first setup without editing `.env`. Existi
 
 1. Sign in as an `OWNER` or `ADMIN`. `CLERK` users cannot open the admin configuration screen or call the settings/import/sync APIs.
 2. Open **Admin → Configuration**.
-3. Enter:
-   - **Spreadsheet ID** from the Google Sheet URL.
-   - **Service Account Email** from the Google Cloud service account.
-   - **Private Key** from the service account JSON, or paste the full service account JSON into the optional JSON box.
-4. Click **Save Google Settings**. The private key is stored locally in SQLite and is not displayed back in full; the UI only shows configured/masked status.
-5. Click **Test Google Connection**. The test verifies credentials and required tab names.
+3. Paste the full **Google Sheet URL** from your browser address bar. A raw spreadsheet ID is also accepted for advanced users; the app extracts and stores the spreadsheet ID automatically.
+4. Confirm or edit the tab names:
+   - **Items tab name** defaults to `Items`.
+   - **Campers/Balances tab name** defaults to `Campers / Balances`.
+   - **Logs tab name** defaults to `Logs`.
+5. Paste or upload the full service account JSON key. The app auto-fills the service account email and private key from `client_email` and `private_key`. Advanced manual service account email/private key fields remain available if needed.
+6. Click **Save Google Settings**. The sheet URL, extracted spreadsheet ID, tab names, service account email, and private key are stored locally in SQLite. The private key is not displayed back in full; the UI only shows configured/masked status.
+7. Click **Test Google Connection**. The test verifies that the spreadsheet opens, the configured Items, Campers/Balances, and Logs tabs exist, and the service account has edit access.
 
 ### Required Google Sheet tabs and columns
 
-Create these tabs with names exactly as shown:
+Create these tabs, or configure matching custom tab names in **Admin → Configuration**:
 
-- `Items`
+- `Items` (default Items tab)
   - Column A: `Cost`
   - Column B: `Item Name`
   - Column C: `Category`
-- `Campers / Balances`
+- `Campers / Balances` (default Campers/Balances tab)
   - Column A: `Child Name`
   - Column B: `Initial Balance`
   - Column C: `Current Balance`
-- `Logs`
+- `Logs` (default Logs tab)
   - Transaction logs are appended here during sync.
 
 Rows begin on row 2. Blank rows are skipped. Item rows with missing item names or invalid costs are skipped with detailed Admin UI warnings; item rows with missing categories import as `Uncategorized` with warnings. Invalid tab names and duplicate camper names are reported as detailed errors in the Admin UI.
@@ -108,18 +110,18 @@ Rows begin on row 2. Blank rows are skipped. Item rows with missing item names o
 
 1. In Google Cloud, create a service account and enable the Google Sheets API for the project.
 2. Create/download a JSON key for the service account.
-3. Open the Google Sheet, click **Share**, and share it with the service account `client_email` as **Editor**.
-4. Paste the service account email/key or full JSON into **Admin → Configuration**.
+3. Open the Google Sheet, click **Share**, and share it with the service account `client_email` as **Editor**. Editor access is required so pending transactions can append to Logs and update camper balances.
+4. Paste or upload the full JSON into **Admin → Configuration**. The app will auto-fill the service account email and private key.
 
 ### Import/sync workflow
 
 Use **Admin → Configuration** or the dashboard import/sync card:
 
-- **Test Connection** validates credentials and tabs.
-- **Import Items only** imports `Items!A2:C` and reports imported item counts by category when the import completes.
-- **Import Campers/Balances only** imports `Campers / Balances!A2:C`.
+- **Test Connection** validates credentials, configured tabs, and edit access.
+- **Import Items from configured Items tab** imports the configured Items tab range `A2:C` and reports imported item counts by category when the import completes.
+- **Import Campers from configured Campers/Balances tab** imports the configured Campers/Balances tab range `A2:C`.
 - **Import Everything** imports items and campers/balances.
-- **Push Pending Transactions** appends unsynced local sales to `Logs` and updates camper current balances in `Campers / Balances`.
+- **Push Pending Transactions to Logs and balances** appends unsynced local sales to the configured Logs tab and updates camper current balances in the configured Campers/Balances tab.
 
 The dashboard shows Google Sheets status, last import time, last sync time, pending sync count, total items, and item counts by category.
 
