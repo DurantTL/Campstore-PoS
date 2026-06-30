@@ -52,3 +52,35 @@ test('items support category data', () => {
   const item = db.prepare('SELECT name,cost_cents,category,active FROM items WHERE id=?').get('item_1');
   assert.deepEqual(item, { name: 'Flashlight', cost_cents: 250, category: 'Camping', active: 1 });
 });
+
+test('migration upgrades older items table before category is referenced', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const Database = require('better-sqlite3');
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'campstore-migrate-old-items-')), 'test.sqlite');
+  const oldDb = new Database(dbPath);
+  oldDb.exec(`
+    CREATE TABLE items(id TEXT PRIMARY KEY,name TEXT NOT NULL,cost_cents INTEGER NOT NULL,updated_at TEXT NOT NULL);
+    INSERT INTO items(id,name,cost_cents,updated_at) VALUES('old_item','Compass',599,'2026-01-01T00:00:00.000Z');
+  `);
+  oldDb.close();
+
+  process.env.DATABASE_PATH = dbPath;
+  process.env.DEFAULT_OWNER_USERNAME = 'owner3';
+  process.env.DEFAULT_OWNER_PASSWORD = 'secret123';
+  process.env.SESSION_SECRET = 'test-session-secret-3';
+  delete require.cache[require.resolve('../server')];
+  const { db } = require('../server');
+
+  const cols = db.prepare('PRAGMA table_info(items)').all().map(c => c.name);
+  assert.ok(cols.includes('category'));
+  assert.ok(cols.includes('active'));
+  assert.ok(cols.includes('sku'));
+  assert.ok(cols.includes('notes'));
+
+  const item = db.prepare('SELECT name,cost_cents,category,active FROM items WHERE id=?').get('old_item');
+  assert.deepEqual(item, { name: 'Compass', cost_cents: 599, category: 'Uncategorized', active: 1 });
+  const categoryStatus = db.prepare('SELECT category,count(*) c FROM items WHERE active=1 GROUP BY category ORDER BY category').all();
+  assert.deepEqual(categoryStatus, [{ category: 'Uncategorized', c: 1 }]);
+});

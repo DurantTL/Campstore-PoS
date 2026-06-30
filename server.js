@@ -24,21 +24,29 @@ function migrate(){
  db.exec(`CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY,name TEXT NOT NULL,cost_cents INTEGER NOT NULL,category TEXT NOT NULL DEFAULT 'Uncategorized',active INTEGER NOT NULL DEFAULT 1,sku TEXT,notes TEXT,updated_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS campers(id TEXT PRIMARY KEY,name TEXT NOT NULL,initial_balance_cents INTEGER NOT NULL,current_balance_cents INTEGER NOT NULL,sheet_row INTEGER,active INTEGER NOT NULL DEFAULT 1,notes TEXT,updated_at TEXT NOT NULL);
- CREATE INDEX IF NOT EXISTS idx_campers_name ON campers(name);
- CREATE UNIQUE INDEX IF NOT EXISTS idx_items_name_category ON items(lower(name),lower(category));
  CREATE TABLE IF NOT EXISTS transactions(id TEXT PRIMARY KEY,created_at TEXT NOT NULL,clerk TEXT,camper_id TEXT NOT NULL,camper_name TEXT NOT NULL,previous_balance_cents INTEGER NOT NULL,total_cents INTEGER NOT NULL,new_balance_cents INTEGER NOT NULL,items_json TEXT NOT NULL,sync_status TEXT NOT NULL DEFAULT 'pending',synced_at TEXT,error TEXT,FOREIGN KEY(camper_id) REFERENCES campers(id));
  CREATE TABLE IF NOT EXISTS sync_events(id INTEGER PRIMARY KEY AUTOINCREMENT,created_at TEXT NOT NULL,type TEXT NOT NULL,status TEXT NOT NULL,message TEXT);
  CREATE TABLE IF NOT EXISTS balance_adjustments(id TEXT PRIMARY KEY,created_at TEXT NOT NULL,admin TEXT,camper_id TEXT NOT NULL,camper_name TEXT NOT NULL,action TEXT NOT NULL,amount_cents INTEGER,previous_balance_cents INTEGER NOT NULL,new_balance_cents INTEGER NOT NULL,reason TEXT NOT NULL,sync_status TEXT NOT NULL DEFAULT 'pending',synced_at TEXT,error TEXT);
- CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','CLERK')),password_hash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
- CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);`);
+ CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','CLERK')),password_hash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);`);
+
+ // Existing databases may have older tables. Add columns before any SQL below
+ // references them (especially items.category in the category index/status queries).
  ensureColumn('items','category',"TEXT NOT NULL DEFAULT 'Uncategorized'");
+ ensureColumn('items','active',"INTEGER NOT NULL DEFAULT 1");
  ensureColumn('items','sku',"TEXT");
  ensureColumn('items','notes',"TEXT");
  ensureColumn('campers','active',"INTEGER NOT NULL DEFAULT 1");
  ensureColumn('campers','notes',"TEXT");
+ ensureColumn('users','active',"INTEGER NOT NULL DEFAULT 1");
+
+ db.exec(`CREATE INDEX IF NOT EXISTS idx_campers_name ON campers(name);
+ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);`);
+ ensureItemsNameCategoryIndex();
  setDefault('allow_over_balance', String(process.env.ALLOW_OVER_BALANCE === 'true'));
 }
-function ensureColumn(table,column,definition){const cols=db.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name); if(!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)}
+function tableColumns(table){return db.prepare(`PRAGMA table_info(${table})`).all().map(c=>c.name)}
+function ensureColumn(table,column,definition){const cols=tableColumns(table); if(!cols.includes(column)){db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); console.log(`[migration] Added ${table}.${column}`)} else console.log(`[migration] ${table}.${column} already exists`)}
+function ensureItemsNameCategoryIndex(){const duplicates=db.prepare('SELECT lower(name) name_key, lower(category) category_key, count(*) c FROM items GROUP BY lower(name), lower(category) HAVING c > 1 LIMIT 1').get(); if(duplicates){console.log('[migration] Skipped idx_items_name_category because duplicate item names/categories already exist'); return} db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_name_category ON items(lower(name),lower(category))'); console.log('[migration] Ensured idx_items_name_category')}
 function setDefault(k,v){db.prepare('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)').run(k,v)}
 function seedDefaultOwner(){const existingCount=db.prepare('SELECT count(*) c FROM users').get().c; if(existingCount>0) return {seeded:false,reason:'users-exist'}; const username=process.env.DEFAULT_OWNER_USERNAME, password=process.env.DEFAULT_OWNER_PASSWORD; if(!username||!password) return {seeded:false,reason:'missing-env'}; const display=process.env.DEFAULT_OWNER_DISPLAY_NAME||username; const stamp=now(); db.prepare('INSERT INTO users(id,username,display_name,role,password_hash,active,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('user_'+nanoid(),username,display,'OWNER',hashPassword(password),1,stamp,stamp); return {seeded:true,username}}
 function hashPassword(password){const salt=randomBytes(16).toString('hex'); const hash=scryptSync(password,salt,64).toString('hex'); return `scrypt$${salt}$${hash}`}
