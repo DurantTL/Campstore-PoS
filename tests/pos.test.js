@@ -95,6 +95,50 @@ test('roster importer detects UltraCamp exports and reconciles cabins + balances
   assert.equal(plan.summary.newPeople, 1);                 // Julian Allen is new
 });
 
+test('walk-up add, cabin move, and optimistic-concurrency save', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'campstore-live-')), 'test.sqlite');
+  process.env.DATABASE_PATH = dbPath;
+  process.env.DEFAULT_OWNER_USERNAME = 'owner5';
+  process.env.DEFAULT_OWNER_PASSWORD = 'secret123';
+  process.env.SESSION_SECRET = 'test-session-secret-5';
+  delete require.cache[require.resolve('../server')];
+  const { app } = require('../server');
+  const server = await new Promise(resolve => { const s = app.listen(0, () => resolve(s)); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'owner5', password: 'secret123' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const post = (p, b) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', cookie }, body: JSON.stringify(b) });
+  try {
+    // Walk-up registration creates an active camper with a starting balance.
+    let r = await post('/api/campers/quick-add', { name: 'Walkup Wanda', cabin: 'Bear', initial_balance: '30.00' });
+    assert.equal(r.status, 200);
+    const created = (await r.json()).camper;
+    assert.equal(created.current_balance_cents, 3000);
+    assert.equal(created.initial_balance_cents, 3000);
+    assert.equal(created.cabin, 'Bear');
+    assert.equal(created.active, 1);
+
+    // Cabin move only changes the cabin.
+    r = await post(`/api/campers/${created.id}/cabin`, { cabin: 'Coyote' });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).cabin, 'Coyote');
+
+    // A save carrying a stale updated_at is rejected with 409 instead of clobbering.
+    r = await post(`/api/campers/${created.id}`, { name: 'Walkup Wanda', expected_updated_at: created.updated_at, current_balance: '30.00', initial_balance: '30.00' });
+    assert.equal(r.status, 409);
+    assert.equal((await r.json()).conflict, true);
+
+    // The camper appears in the clerk state feed for other stations.
+    const state = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json();
+    assert.ok(state.campers.find(c => c.id === created.id));
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('migration upgrades older items table before category is referenced', () => {
   const fs = require('node:fs');
   const os = require('node:os');

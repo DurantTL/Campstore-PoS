@@ -48,6 +48,17 @@ textarea{width:100%;font-size:15px;padding:12px;border:1px solid #c7d8ec;border-
   to{opacity:1;transform:translateX(0)}
 }
 
+/* --- Walk-up quick add (Clerk POS) --- */
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.panel-head h2{margin:0}
+.mini-add{margin:0;background:var(--blue);border-color:var(--blue);color:#fff;border-radius:999px;padding:8px 14px;font-size:14px;white-space:nowrap}
+.quick-add{background:#f0f6ff;border:1px solid var(--border);border-radius:14px;padding:14px;margin:12px 0}
+.quick-add .eyebrow{margin-bottom:8px}
+.quick-add input{margin-bottom:8px}
+.quick-add-actions{display:flex;gap:8px}
+.quick-add-actions button{margin:0;flex:1}
+.qa-msg{font-weight:800;color:var(--navy);margin:8px 0 0;min-height:0}
+
 /* --- Cabin selector (Clerk POS) --- */
 .cabin-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .cabin-chip{display:inline-flex;align-items:center;gap:7px;margin:0;padding:10px 14px;border-radius:999px;background:#eef6ff;border:1px solid var(--border);color:var(--navy);font-weight:800;font-size:15px}

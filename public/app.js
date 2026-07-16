@@ -70,7 +70,15 @@ function cabinList() {
   return named;
 }
 
+function renderCabinOptions() {
+  const dl = $('cabinOptions');
+  if (!dl) return;
+  const names = [...new Set(state.campers.map(c => (c.cabin || '').trim()).filter(Boolean))].sort();
+  dl.innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+}
+
 function renderCabins() {
+  renderCabinOptions();
   const host = $('cabinBar');
   if (!host) return;
   const cabins = cabinList();
@@ -220,6 +228,63 @@ async function checkout() {
   resetSaleWorkflow();
 }
 
+// Live refresh so multiple stations (registration, clerks) see each other's
+// adds and cabin moves without reloading. Skips the tab when hidden, and never
+// disturbs the in-progress cart or the selected camper.
+async function refreshState() {
+  if (document.hidden) return;
+  try {
+    const r = await fetch('/api/state');
+    if (!r.ok) return;
+    const next = await r.json();
+    state.items = next.items;
+    state.campers = next.campers;
+    $('sync').textContent = `Pending Google Sync: ${next.pendingGoogleSync ?? next.pending} Transactions`;
+    if (selected) selected = state.campers.find(c => c.id === selected.id) || selected;
+    cart = cart.filter(l => state.items.find(i => i.id === l.id));
+    if (!cart.length) saleCamperId = null;
+    renderCabins();
+    renderCampers();
+    renderItems();
+    renderSelected();
+    renderCart();
+  } catch {}
+}
+
+function toggleQuickAdd(show) {
+  const f = $('quickAddForm');
+  f.hidden = show === undefined ? !f.hidden : !show;
+  if (!f.hidden) {
+    $('qaName').focus();
+  } else {
+    $('qaName').value = '';
+    $('qaCabin').value = '';
+    $('qaBalance').value = '';
+    $('qaMsg').textContent = '';
+  }
+}
+
+async function quickAddCamper(e) {
+  e.preventDefault();
+  const name = $('qaName').value.trim();
+  if (!name) { $('qaMsg').textContent = 'Enter a name.'; return; }
+  $('qaMsg').textContent = 'Adding…';
+  const r = await fetch('/api/campers/quick-add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, cabin: $('qaCabin').value.trim(), initial_balance: $('qaBalance').value.trim() })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { $('qaMsg').textContent = d.error || 'Could not add camper.'; return; }
+  state.campers.push(d.camper);
+  toast('success', '✓ Camper Added', [d.camper.name, d.camper.cabin || 'No cabin', fmt(d.camper.current_balance_cents)]);
+  toggleQuickAdd(false);
+  selectedCabin = null;
+  renderCabins();
+  renderCampers();
+  selectCamper(d.camper.id);
+}
+
 $('camperSearch').oninput = renderCampers;
 $('itemSearch').oninput = () => {
   if ($('itemSearch').value.trim()) selectedCategory = null;
@@ -228,4 +293,8 @@ $('itemSearch').oninput = () => {
 $('checkout').onclick = checkout;
 $('clear').onclick = clearCart;
 $('logout').onclick = logout;
+$('addCamperBtn').onclick = () => toggleQuickAdd();
+$('qaCancel').onclick = () => toggleQuickAdd(false);
+$('quickAddForm').onsubmit = quickAddCamper;
+setInterval(refreshState, 8000);
 load();
