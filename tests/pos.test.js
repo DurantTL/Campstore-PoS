@@ -178,6 +178,16 @@ test('staff get 10% discount and may go negative; campers cannot', async () => {
     assert.equal(r.status, 409);
     assert.equal(db.prepare('SELECT current_balance_cents c FROM campers WHERE id=?').get('p_camper').c, 500);
 
+    // A client-supplied override flag must not bypass the camper block.
+    r = await post('/api/sale', { camperId: 'p_camper', cart: [{ id: 'item_hoodie', qty: 1 }], allowOverride: true });
+    assert.equal(r.status, 409);
+    assert.equal(db.prepare('SELECT current_balance_cents c FROM campers WHERE id=?').get('p_camper').c, 500);
+
+    // Clerk-facing quick-add cannot mint Staff records (that would grant discount + negative privileges).
+    r = await post('/api/campers/quick-add', { name: 'Sneaky Clerk', person_type: 'Staff', initial_balance: '1.00' });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).camper.person_type, 'Camper');
+
     // Staff pay 10% less ($10 → $9) and may go negative ($5 − $9 = −$4).
     r = await post('/api/sale', { camperId: 'p_staff', cart: [{ id: 'item_hoodie', qty: 1 }] });
     assert.equal(r.status, 200);

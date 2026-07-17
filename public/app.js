@@ -250,7 +250,7 @@ async function checkout() {
   const r = await fetch('/api/sale', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ camperId: selected.id, cart, allowOverride: false })
+    body: JSON.stringify({ camperId: selected.id, cart })
   });
   const data = await r.json();
   if (!r.ok) return alert(data.error);
