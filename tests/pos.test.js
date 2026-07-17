@@ -147,6 +147,66 @@ test('walk-up add, cabin move, and optimistic-concurrency save', async () => {
   }
 });
 
+test('staff get 10% discount and may go negative; campers cannot', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'campstore-staff-')), 'test.sqlite');
+  process.env.DATABASE_PATH = dbPath;
+  process.env.DEFAULT_OWNER_USERNAME = 'owner6';
+  process.env.DEFAULT_OWNER_PASSWORD = 'secret123';
+  process.env.SESSION_SECRET = 'test-session-secret-6';
+  delete require.cache[require.resolve('../server')];
+  const { app, db } = require('../server');
+  const server = await new Promise(resolve => { const s = app.listen(0, () => resolve(s)); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'owner6', password: 'secret123' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const post = (p, b) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', cookie }, body: JSON.stringify(b) });
+  try {
+    const stamp = new Date().toISOString();
+    db.prepare('INSERT INTO items(id,name,cost_cents,category,active,updated_at) VALUES(?,?,?,?,?,?)').run('item_hoodie', 'Hoodie', 1000, 'Apparel', 1, stamp);
+    db.prepare('INSERT INTO campers(id,name,person_type,initial_balance_cents,current_balance_cents,active,source,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('p_staff', 'Sam Staff', 'Staff', 500, 500, 1, 'manual', stamp);
+    db.prepare('INSERT INTO campers(id,name,person_type,initial_balance_cents,current_balance_cents,active,source,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('p_camper', 'Casey Camper', 'Camper', 500, 500, 1, 'manual', stamp);
+
+    // The default discount rate is exposed to the POS via settings.
+    const state = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json();
+    assert.equal(state.settings.staff_discount_percent, '10');
+
+    // A camper cannot go negative: $10 item vs $5 balance is rejected.
+    let r = await post('/api/sale', { camperId: 'p_camper', cart: [{ id: 'item_hoodie', qty: 1 }] });
+    assert.equal(r.status, 409);
+    assert.equal(db.prepare('SELECT current_balance_cents c FROM campers WHERE id=?').get('p_camper').c, 500);
+
+    // A client-supplied override flag must not bypass the camper block.
+    r = await post('/api/sale', { camperId: 'p_camper', cart: [{ id: 'item_hoodie', qty: 1 }], allowOverride: true });
+    assert.equal(r.status, 409);
+    assert.equal(db.prepare('SELECT current_balance_cents c FROM campers WHERE id=?').get('p_camper').c, 500);
+
+    // Clerk-facing quick-add cannot mint Staff records (that would grant discount + negative privileges).
+    r = await post('/api/campers/quick-add', { name: 'Sneaky Clerk', person_type: 'Staff', initial_balance: '1.00' });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).camper.person_type, 'Camper');
+
+    // Staff pay 10% less ($10 → $9) and may go negative ($5 − $9 = −$4).
+    r = await post('/api/sale', { camperId: 'p_staff', cart: [{ id: 'item_hoodie', qty: 1 }] });
+    assert.equal(r.status, 200);
+    const sale = await r.json();
+    assert.equal(sale.subtotal_cents, 1000);
+    assert.equal(sale.discount_cents, 100);
+    assert.equal(sale.discount_percent, 10);
+    assert.equal(sale.total_cents, 900);
+    assert.equal(sale.new_balance_cents, -400);
+    assert.equal(db.prepare('SELECT current_balance_cents c FROM campers WHERE id=?').get('p_staff').c, -400);
+
+    // The discount is stored on the transaction for logs and exports.
+    const tx = db.prepare('SELECT total_cents,discount_cents,new_balance_cents FROM transactions WHERE id=?').get(sale.id);
+    assert.deepEqual(tx, { total_cents: 900, discount_cents: 100, new_balance_cents: -400 });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('migration upgrades older items table before category is referenced', () => {
   const fs = require('node:fs');
   const os = require('node:os');
