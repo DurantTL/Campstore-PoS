@@ -108,7 +108,7 @@ function renderCampers() {
   $('campers').innerHTML = list
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 60)
-    .map(c => `<div class="row ${selected?.id === c.id ? 'selected' : ''} ${saleCamperId && saleCamperId !== c.id ? 'locked-choice' : ''}" onclick="selectCamper('${c.id}')"><b>${esc(c.name)}</b>${c.cabin ? `<span class="cabin-tag">${esc(c.cabin)}</span>` : ''}<br><span class="muted">Current: ${fmt(c.current_balance_cents)}</span></div>`)
+    .map(c => `<div class="row ${selected?.id === c.id ? 'selected' : ''} ${saleCamperId && saleCamperId !== c.id ? 'locked-choice' : ''}" onclick="selectCamper('${c.id}')"><b>${esc(c.name)}</b>${c.person_type === 'Staff' ? '<span class="staff-tag">Staff</span>' : ''}${c.cabin ? `<span class="cabin-tag">${esc(c.cabin)}</span>` : ''}<br><span class="muted">Current: ${fmt(c.current_balance_cents)}</span></div>`)
     .join('') || '<p class="muted">No campers match. Try a different cabin or search.</p>';
 }
 
@@ -116,7 +116,7 @@ function renderSelected() {
   if (!selected) return;
   const locked = cart.length > 0;
   $('selected').className = `balance-card ${locked ? 'sale-locked' : ''}`;
-  $('selected').innerHTML = `<div class="selected-head"><h3>${esc(selected.name)}</h3>${locked ? '<span class="lock-pill">🔒 Sale in Progress</span>' : ''}</div><p class="muted">Current balance</p><div class="amount">${fmt(selected.current_balance_cents)}</div><p>Initial balance: <b>${fmt(selected.initial_balance_cents)}</b></p>`;
+  $('selected').innerHTML = `<div class="selected-head"><h3>${esc(selected.name)}${isStaff(selected) ? ' <span class="staff-tag">Staff</span>' : ''}</h3>${locked ? '<span class="lock-pill">🔒 Sale in Progress</span>' : ''}</div><p class="muted">Current balance</p><div class="amount ${selected.current_balance_cents < 0 ? 'danger' : ''}">${fmt(selected.current_balance_cents)}</div><p>Initial balance: <b>${fmt(selected.initial_balance_cents)}</b></p>${isStaff(selected) ? `<p class="muted">${staffDiscountPercent()}% staff discount applies · account may go negative</p>` : ''}`;
 }
 
 function selectCamper(id) {
@@ -193,16 +193,45 @@ function total() {
   return cart.reduce((a, l) => a + state.items.find(i => i.id === l.id).cost_cents * l.qty, 0);
 }
 
+function isStaff(person) {
+  return person?.person_type === 'Staff';
+}
+
+function staffDiscountPercent() {
+  const n = Number(state.settings?.staff_discount_percent);
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 10;
+}
+
+function discountCents(subtotal) {
+  return isStaff(selected) ? Math.round(subtotal * staffDiscountPercent() / 100) : 0;
+}
+
 function renderCart() {
   $('cart').innerHTML = cart.map(l => {
     const i = state.items.find(x => x.id === l.id);
     return `<div class="cartLine"><div><b>${esc(i.name)}</b><br>${l.qty} × ${fmt(i.cost_cents)} = ${fmt(i.cost_cents * l.qty)}</div><div class="qty"><button onclick="qty('${l.id}',-1)">−</button><b>${l.qty}</b><button onclick="qty('${l.id}',1)">+</button></div></div>`;
   }).join('') || '<p class="muted">No items yet.</p>';
-  const t = total();
+  const subtotal = total();
+  const discount = discountCents(subtotal);
+  const t = subtotal - discount;
+  $('subtotalRow').hidden = !discount;
+  $('discountRow').hidden = !discount;
+  if (discount) {
+    $('subtotal').textContent = fmt(subtotal);
+    $('discountLabel').textContent = `Staff discount (${staffDiscountPercent()}%)`;
+    $('discount').textContent = '−' + fmt(discount);
+  }
   $('total').textContent = fmt(t);
   const nb = selected ? selected.current_balance_cents - t : null;
   $('newBal').textContent = selected ? fmt(nb) : '—';
-  $('warn').innerHTML = selected && nb < 0 ? '<span class="danger">Warning: purchase exceeds current balance.</span>' : '';
+  $('newBal').classList.toggle('danger', !!selected && nb < 0);
+  const allowOver = state.settings?.allow_over_balance === 'true';
+  const blocked = !!selected && nb < 0 && !isStaff(selected) && !allowOver;
+  $('checkout').disabled = blocked;
+  $('warn').innerHTML = !selected || nb >= 0 ? ''
+    : isStaff(selected) ? '<span class="staff-neg">Staff account will go negative — allowed for staff.</span>'
+    : blocked ? '<span class="danger">Purchase exceeds balance. Camper accounts cannot go negative — remove items or add funds.</span>'
+    : '<span class="danger">Warning: purchase exceeds current balance.</span>';
 }
 
 function clearCart() {
@@ -217,7 +246,7 @@ function clearCart() {
 async function checkout() {
   if (!selected) return alert('Select a camper first.');
   if (!cart.length) return alert('Add at least one item.');
-  const saleName = selected.name, saleTotal = total();
+  const saleName = selected.name;
   const r = await fetch('/api/sale', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -228,7 +257,12 @@ async function checkout() {
   await load();
   const updated = state.campers.find(c => c.id === data.camperId);
   if (updated) updated.current_balance_cents = data.new_balance_cents;
-  toast('success', '✓ Sale Complete', [saleName, fmt(saleTotal), 'Queued for Google Sync']);
+  toast('success', '✓ Sale Complete', [
+    saleName,
+    fmt(data.total_cents),
+    data.discount_cents ? `Staff discount −${fmt(data.discount_cents)}` : '',
+    'Queued for Google Sync'
+  ]);
   resetSaleWorkflow();
 }
 
